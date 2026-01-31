@@ -1,260 +1,198 @@
 import 'package:flutter/material.dart';
+import 'data/food_classifier.dart';
+import 'data/food_data.dart';
 
 void main() {
-  runApp(const SikgyeolApp());
+  runApp(const SikGyeolApp());
 }
 
-class SikgyeolApp extends StatelessWidget {
-  const SikgyeolApp({super.key});
+class SikGyeolApp extends StatelessWidget {
+  const SikGyeolApp({super.key});
 
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
-      title: '식결',
+    return const MaterialApp(
       debugShowCheckedModeBanner: false,
-      theme: ThemeData(
-        scaffoldBackgroundColor: const Color(0xFFF4F1EC),
-        fontFamily: 'Roboto',
-      ),
-      home: const TodayPage(),
+      home: FoodCheckPage(),
     );
   }
 }
 
-class TodayPage extends StatefulWidget {
-  const TodayPage({super.key});
+class FoodCheckPage extends StatefulWidget {
+  const FoodCheckPage({super.key});
 
   @override
-  State<TodayPage> createState() => _TodayPageState();
+  State<FoodCheckPage> createState() => _FoodCheckPageState();
 }
 
-class _TodayPageState extends State<TodayPage> {
-  final TextEditingController _foodController = TextEditingController();
-  bool _showResult = false;
+class _FoodCheckPageState extends State<FoodCheckPage> {
+  final TextEditingController birthCtrl = TextEditingController();
+  final TextEditingController foodCtrl = TextEditingController();
+
+  String element = '';
+  int score = 50;
+  String decisionSummary = '';
+
+  List<String> suggestions = [];
+
+  /* ================= 체질 계산 ================= */
+
+  String calcElement(String birth) {
+    if (birth.length < 4) return '';
+    final year = int.tryParse(birth.substring(0, 4));
+    if (year == null) return '';
+
+    final stems = ['갑','을','병','정','무','기','경','신','임','계'];
+    final stem = stems[(year - 4) % 10];
+
+    if (['갑','을'].contains(stem)) return '목';
+    if (['병','정'].contains(stem)) return '화';
+    if (['무','기'].contains(stem)) return '토';
+    if (['경','신'].contains(stem)) return '금';
+    return '수';
+  }
+
+  /* ================= 자동완성 ================= */
+
+  void updateSuggestions(String input) {
+    if (input.isEmpty) {
+      setState(() => suggestions.clear());
+      return;
+    }
+
+    setState(() {
+      suggestions = allFoodKeywords
+          .where((f) => f.contains(input))
+          .take(6)
+          .toList();
+    });
+  }
+
+  /* ================= 평가 로직 ================= */
+
+  void evaluate() {
+    score = 50;
+    final foods = foodCtrl.text
+        .split(',')
+        .map((e) => e.trim())
+        .where((e) => e.isNotEmpty)
+        .toList();
+
+    final reasons = <String>{};
+    final weightTable = bodyFoodWeight[element];
+
+    for (final food in foods) {
+      final profile = classifyFood(food);
+      score += 2; // 기본점수
+
+      void apply(List<String> values, Map<String, int>? table) {
+        if (table == null) return;
+        for (final v in values) {
+          if (table.containsKey(v)) {
+            score += table[v]!;
+            if (table[v]! < 0) reasons.add(v);
+          }
+        }
+      }
+
+      apply(profile.ingredients, weightTable?['ingredients']);
+      apply(profile.cooking, weightTable?['cooking']);
+      apply(profile.stimulus, weightTable?['stimulus']);
+    }
+
+    decisionSummary = reasons.isEmpty
+        ? '전반적으로 무난한 구성의 식사입니다.'
+        : '${reasons.take(3).join(' · ')} 성향이 겹쳐 부담이 될 수 있습니다.';
+
+    setState(() {});
+  }
+
+  /* ================= UI ================= */
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('식결'),
-        backgroundColor: const Color(0xFFF4F1EC),
-        elevation: 0,
-        foregroundColor: const Color(0xFF3B2F2A),
-      ),
-      body: SingleChildScrollView(
+      appBar: AppBar(title: const Text('식결')),
+      body: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            _TodaySummaryCard(),
-            const SizedBox(height: 16),
-            _FoodInputCard(
-              controller: _foodController,
-              onSubmit: () {
-                setState(() {
-                  _showResult = true;
-                });
-              },
-            ),
-            if (_showResult) ...[
-              const SizedBox(height: 16),
-              const _FoodResultCard(),
-              const SizedBox(height: 16),
-              const _BalanceGuideCard(),
-              const SizedBox(height: 16),
-              const _MovementCard(),
-            ],
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-/* ---------- 카드 컴포넌트들 ---------- */
-
-class _TodaySummaryCard extends StatelessWidget {
-  @override
-  Widget build(BuildContext context) {
-    return _Card(
-      title: '오늘의 정리',
-      child: const Text(
-        '토 중심 · 수 보완이 필요한 흐름\n'
-        '오늘은 과하지 않은 선택이 기준입니다.',
-        style: TextStyle(height: 1.6),
-      ),
-    );
-  }
-}
-
-class _FoodInputCard extends StatelessWidget {
-  final TextEditingController controller;
-  final VoidCallback onSubmit;
-
-  const _FoodInputCard({
-    required this.controller,
-    required this.onSubmit,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return _Card(
-      title: '오늘 먹을 음식은?',
-      child: Column(
-        children: [
-          TextField(
-            controller: controller,
-            decoration: const InputDecoration(
-              hintText: '예: 굴국, 라면, 아이스커피',
-              border: OutlineInputBorder(),
-              isDense: true,
-            ),
-          ),
-          const SizedBox(height: 12),
-          SizedBox(
-            width: double.infinity,
-            child: ElevatedButton(
-              onPressed: onSubmit,
-              style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFF3B2F2A),
-                foregroundColor: Colors.white,
+            TextField(
+              controller: birthCtrl,
+              decoration: const InputDecoration(
+                labelText: '생년월일',
+                hintText: '예: 19980427',
               ),
-              child: const Text('결과 보기'),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _FoodResultCard extends StatelessWidget {
-  const _FoodResultCard();
-
-  @override
-  Widget build(BuildContext context) {
-    return _Card(
-      title: '음식 판단',
-      child: const Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            '굴국 → 조건부 괜찮음',
-            style: TextStyle(
-              fontWeight: FontWeight.bold,
-            ),
-          ),
-          SizedBox(height: 8),
-          Text(
-            '따뜻하지만 소화에 에너지가 조금 쓰일 수 있어요.',
-          ),
-          SizedBox(height: 8),
-          Text(
-            '국물은 줄이고 천천히 먹는 쪽이 편합니다.',
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _BalanceGuideCard extends StatelessWidget {
-  const _BalanceGuideCard();
-
-  @override
-  Widget build(BuildContext context) {
-    return _Card(
-      title: '오늘의 보완 포인트',
-      child: const Text(
-        '소화에 에너지가 쓰인 날이라\n'
-        '몸을 더 쓰기보다는 회복 쪽이 좋습니다.',
-        style: TextStyle(height: 1.6),
-      ),
-    );
-  }
-}
-
-class _MovementCard extends StatefulWidget {
-  const _MovementCard();
-
-  @override
-  State<_MovementCard> createState() => _MovementCardState();
-}
-
-class _MovementCardState extends State<_MovementCard> {
-  bool _expanded = false;
-
-  @override
-  Widget build(BuildContext context) {
-    return _Card(
-      title: '오늘의 움직임 제안',
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Text('몸을 덜 소모하는 방향'),
-          const SizedBox(height: 8),
-          TextButton(
-            onPressed: () {
-              setState(() {
-                _expanded = !_expanded;
-              });
-            },
-            child: Text(_expanded ? '접기' : '열기'),
-          ),
-          if (_expanded) ...[
-            const Divider(),
-            const Text(
-              '추천되는 움직임',
-              style: TextStyle(fontWeight: FontWeight.bold),
-            ),
-            const Text('- 짧은 산책\n- 가벼운 스트레칭'),
-            const SizedBox(height: 12),
-            const Text(
-              '오늘은 피하면 좋은 움직임',
-              style: TextStyle(fontWeight: FontWeight.bold),
-            ),
-            const Text('- 장시간 고강도 운동'),
-          ],
-        ],
-      ),
-    );
-  }
-}
-
-/* ---------- 공통 카드 ---------- */
-
-class _Card extends StatelessWidget {
-  final String title;
-  final Widget child;
-
-  const _Card({required this.title, required this.child});
-
-  @override
-  Widget build(BuildContext context) {
-    return Card(
-      elevation: 0,
-      color: Colors.white,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(12),
-      ),
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              title,
-              style: const TextStyle(
-                fontWeight: FontWeight.bold,
-                color: Color(0xFF3B2F2A),
-              ),
+              keyboardType: TextInputType.number,
+              onChanged: (v) => setState(() => element = calcElement(v)),
             ),
             const SizedBox(height: 8),
-            child,
+            Text('체질: $element'),
+
+            const SizedBox(height: 16),
+
+            TextField(
+              controller: foodCtrl,
+              decoration: const InputDecoration(
+                labelText: '먹은 음식',
+                hintText: '예: 불닭볶음면, 치킨',
+              ),
+              onChanged: updateSuggestions,
+            ),
+
+            if (suggestions.isNotEmpty)
+              Wrap(
+                spacing: 8,
+                children: suggestions.map((s) {
+                  return ActionChip(
+                    label: Text(s),
+                    onPressed: () {
+                      foodCtrl.text = s;
+                      suggestions.clear();
+                      setState(() {});
+                    },
+                  );
+                }).toList(),
+              ),
+
+            const SizedBox(height: 16),
+
+            ElevatedButton(
+              onPressed: element.isEmpty || foodCtrl.text.isEmpty
+                  ? null
+                  : evaluate,
+              child: const Text('오늘 식사 평가'),
+            ),
+
+            const Divider(height: 32),
+
+            if (decisionSummary.isNotEmpty)
+              Card(
+                child: Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: Text(
+                    decisionSummary,
+                    style: const TextStyle(
+                      fontSize: 15,
+                      height: 1.4,
+                    ),
+                  ),
+                ),
+              ),
+
+            const SizedBox(height: 8),
+            Text('점수: $score점'),
+
+            const Spacer(),
+
+            const Text(
+              '※ 본 앱은 생활 리듬 참고용이며\n의학·영양 처방이 아닙니다.',
+              textAlign: TextAlign.center,
+              style: TextStyle(fontSize: 12, color: Colors.grey),
+            ),
           ],
         ),
       ),
     );
   }
 }
-// first push to github
